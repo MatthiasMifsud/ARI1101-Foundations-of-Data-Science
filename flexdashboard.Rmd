@@ -1,0 +1,801 @@
+---
+title: "Air Quality Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+runtime: shiny
+---
+
+```{r , include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(shiny)
+library(tibble)
+library(flexdashboard)
+library(zoo)
+library(rlang)
+```
+
+```{r , include=FALSE}
+
+monitoring_centre_data <- read.table(
+  "PRSA_Data_20130301-20170228/PRSA_Data_Aotizhongxin_20130301-20170228.csv",
+  sep = ",", 
+  header = TRUE)
+
+monitoring_centre_data$Date <- as.Date(
+  paste(monitoring_centre_data$day, 
+        monitoring_centre_data$month, 
+        monitoring_centre_data$year, 
+        sep = "/"), 
+        format = "%d/%m/%Y")
+
+monitoring_dataset <- select(monitoring_centre_data, 
+                             Date, 
+                             Time = hour, 
+                             PM2.5, 
+                             PM10, 
+                             NO2, 
+                             SO2, 
+                             CO, 
+                             O3, 
+                             Temperature = TEMP)
+
+# Summary statistics function
+summary_function <- function(variable){
+  meanVal <- mean(monitoring_dataset[[variable]], na.rm = TRUE)
+  medianVal <- median(monitoring_dataset[[variable]], na.rm = TRUE)
+  sdVal <- sd(monitoring_dataset[[variable]], na.rm = TRUE)
+  
+  return(c(mean = meanVal, median = medianVal, sd = sdVal))
+}
+
+
+variables <- c("PM2.5", "PM10", "SO2", "NO2", "CO", "O3", "Temperature")
+summary_result <- sapply(variables, summary_function)
+
+summary_statistic <- data.frame(t(summary_result))
+summary_statistic <- rownames_to_column(summary_statistic, var = "Variable")
+
+summary_names <- c("Variable", "Mean", "Median", "Standard Deviation")
+colnames(summary_statistic) <- summary_names
+```
+
+
+ 1
+=====================================
+
+Row {data-height=500}
+-------------------------------------
+
+### Data
+```{r}
+summary_ui <- fluidPage(
+  titlePanel("Summary Statistics of Date, Time, PM2.5, PM10, NO2, SO2, CO, O3 and Temperature"),
+  fluidRow(
+    tags$head(
+      tags$style(HTML(".table { width: 100% !important; }"))
+    ),
+    column(12,
+           tableOutput("summaryTable") 
+           )
+    )
+  )
+
+server <- function(input, output) {
+  output$summaryTable <- renderTable({
+    summary_statistic
+  })
+}
+
+shinyApp(ui = summary_ui, server = server)
+```
+
+Row 
+-------------------------------------
+
+### Description
+```{r}
+HTML("
+
+<p style='font-size: 20px; line-height: 1.6;'>
+  <b style='font-size: 22px;'>Variable Descriptions:</b><br>
+  <b>Date:</b> The day, month, and year when monitoring occurred.<br>
+  <b>Time:</b> The hour of monitoring.<br>
+  <b>PM2.5:</b> Fine particulate matter in the air ≤ 2.5 µm in diameter.<br>
+  <b>PM10:</b> Fine particulate matter in the air ≤ 10 µm in diameter.<br>
+  <b>NO2:</b> Nitrogen dioxide, a harmful gas pollutant produced by combustion.<br>
+  <b>SO2:</b> Sulfur dioxide, a harmful gas from burning fossil fuels.<br>
+  <b>CO:</b> Carbon monoxide, a colorless and odorless gas produced by incomplete combustion.<br>
+  <b>O3:</b> Ozone, a harmful gas formed by reactions of sunlight with pollutants.<br>
+  <b>Temperature:</b> The temperature in Celsius at the monitoring site.
+</p>
+")
+```
+
+
+ 2
+=====================================
+
+Row 
+-------------------------------------
+
+### Data
+```{r}
+PM_ui <- fluidPage(
+  titlePanel("The Distribution of PM10 and PM2.5"),
+  
+  dateRangeInput(
+    "dateRange", 
+    label = "Select Date Range", 
+    start = min(monitoring_dataset$Date), 
+    end = max(monitoring_dataset$Date)
+  ),
+  
+  selectInput(
+    "PM",
+    label = "Select Pollutant",
+    choices = c("PM2.5", "PM10"),
+    selected = "PM2.5"
+  ),
+  plotOutput("PM_out")  
+)
+
+server <- function(input, output) {
+  filtered_data <- reactive({
+  monitoring_dataset %>%
+      filter(Date >= input$dateRange[1] & Date <= input$dateRange[2])
+  })
+  output$PM_out <- renderPlot({
+    ggplot(data = filtered_data(), aes(x = !!sym(input$PM))) + 
+      geom_density(fill = "blue", na.rm = TRUE) + 
+      labs(x = paste(input$PM, "(µg/m³)"), y = "Density") + 
+      theme_linedraw()   
+  })
+}
+
+shinyApp(ui = PM_ui, server = server)
+```
+
+### Description {data-width=150}
+
+```{r}
+HTML("
+
+<p style='font-size: 20px; line-height: 1.6;'>
+  <b style='font-size: 22px;'>Observations about air quality trends:</b><br>
+  The above distributions of PM2.5 and PM10 show a right-skewed distribution. Being a right-skewed distribution implies that low     amounts of fine particulate matter (PM) were most commonly recorded, with occasional higher levels being recorded as well. This    indicates that high concentrations of PM are less frequent but still present.
+</p>
+
+")
+```
+
+
+ 3
+=====================================
+
+```{r, include=FALSE}
+missing_values <- colSums(is.na(monitoring_centre_data))
+print(missing_values)
+
+total_missing_values = sum(is.na(monitoring_centre_data))
+
+print(paste("Total number of missing values in 'monitoring_dataset':",
+            total_missing_values))
+
+variables_missing_values <- names(missing_values[missing_values > 0])
+print(paste("Variable that include missing values:", variables_missing_values))
+
+cleaned_monitoring_dataset <- monitoring_centre_data
+
+#forward-fill
+cleaned_monitoring_dataset$TEMP <- na.locf(cleaned_monitoring_dataset$TEMP,
+                                           na.rm = FALSE, 
+                                           fromLast = FALSE)
+cleaned_monitoring_dataset$PRES <- na.locf(cleaned_monitoring_dataset$PRES,
+                                           na.rm = FALSE, 
+                                           fromLast = FALSE)
+cleaned_monitoring_dataset$DEWP <- na.locf(cleaned_monitoring_dataset$DEWP,
+                                           na.rm = FALSE, 
+                                           fromLast = FALSE)
+cleaned_monitoring_dataset$RAIN <- na.locf(cleaned_monitoring_dataset$RAIN,
+                                           na.rm = FALSE, 
+                                           fromLast = FALSE)
+cleaned_monitoring_dataset$wd <- na.locf(cleaned_monitoring_dataset$wd,
+                                         na.rm = FALSE, 
+                                         fromLast = FALSE)
+cleaned_monitoring_dataset$WSPM <- na.locf(cleaned_monitoring_dataset$WSPM,
+                                           na.rm = FALSE, 
+                                           fromLast = FALSE)
+
+#mean-substitution
+cleaned_monitoring_dataset$PM2.5[is.na(cleaned_monitoring_dataset$PM2.5)] <-
+  mean(cleaned_monitoring_dataset$PM2.5, na.rm = TRUE)
+cleaned_monitoring_dataset$PM10[is.na(cleaned_monitoring_dataset$PM10)] <- 
+  mean(cleaned_monitoring_dataset$PM10, na.rm = TRUE)
+cleaned_monitoring_dataset$SO2[is.na(cleaned_monitoring_dataset$SO2)] <- 
+  mean(cleaned_monitoring_dataset$SO2, na.rm = TRUE)
+cleaned_monitoring_dataset$NO2[is.na(cleaned_monitoring_dataset$NO2)] <- 
+  mean(cleaned_monitoring_dataset$NO2, na.rm = TRUE)
+cleaned_monitoring_dataset$CO[is.na(cleaned_monitoring_dataset$CO)] <- 
+  mean(cleaned_monitoring_dataset$CO, na.rm = TRUE)
+cleaned_monitoring_dataset$O3[is.na(cleaned_monitoring_dataset$O3)] <- 
+  mean(cleaned_monitoring_dataset$O3, na.rm = TRUE)
+
+cleaned_missing_data = sum(is.na(cleaned_monitoring_dataset))
+
+print(paste("Amount of missing data of original dataset:",
+            total_missing_values))
+print(paste("Amount of missing data of cleaned dataset:",
+            cleaned_missing_data))
+
+write.csv(cleaned_monitoring_dataset,
+          "cleaned_PRSA_Data_Aotizhongxin_20130301-20170228.csv")
+```
+
+
+Row {data-height=300}
+-------------------------------------
+
+```{r, include=FALSE}
+correlation <- as.data.frame(
+  cor(cleaned_monitoring_dataset[c("PM2.5", "PM10", "NO2", "TEMP")])
+)
+
+correlation <- rownames_to_column(correlation, 
+                                  var = "Variable")
+```
+
+### Data
+```{r}
+correlation_ui <- fluidPage(
+    tags$head(
+    tags$style(HTML(".table { width: 100% !important; }"))
+  ),
+  fluidRow(
+    column(12, 
+           tableOutput("correlationTable") 
+           )
+    )
+  )
+
+server <- function(input, output) {
+  output$correlationTable <- renderTable({
+    correlation
+  })
+}
+
+shinyApp(ui = correlation_ui, server = server)
+```
+
+Row 
+-------------------------------------
+  
+### Description
+```{r}
+HTML("
+
+<style>
+  h4 {
+    font-size: 26px;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  
+  p {
+    font-size: 20px;
+    line-height: 1.6;
+  }
+</style>
+
+<h4>Interpretation of the Relationships Between Pollutants and Temperature</h4>
+<br>
+  <p>
+    <b>PM2.5 and PM10:</b> PM2.5 and PM10 were shown to be highly correlated (0.874). This indicates that they are highly dependent         on one another. An increase in one variable is likely to result in an increase in the other.
+  </p>
+  
+  <p>
+    <b>PM2.5 and NO2:</b> The correlation between PM2.5 and NO2 is moderate (0.677). While not as strong as the correlation between       PM2.5 and PM10, it is significant enough to suggest that a change in one variable could influence the other.
+  </p>
+  
+  <p>
+    <b>PM10 and NO2:</b> PM10 and NO2 also show a moderate correlation (0.647). This indicates that changes in one variable may          result in changes in the other, though the relationship is not as strong as that between PM2.5 and PM10.
+  </p>
+  
+  <p>
+    <b>Pollutants (PM2.5, PM10, NO2) and Temperature (TEMP):</b>
+        All pollutants show a slight negative correlation with temperature. This suggests that an increase in temperature might            lead to lower pollution levels, while a decrease in temperature might result in higher pollution levels. However, the              correlation values are small, so the relationship is weak and not strongly predictive.
+  </p>
+  
+")
+```
+
+
+ 4
+=====================================
+
+```{r}
+daily_average <- cleaned_monitoring_dataset %>% 
+  group_by(Date) %>% 
+  summarise(
+    PM2.5_daily_average = mean(PM2.5), 
+    PM10_daily_average = mean(PM10),
+    NO2_daily_average = mean(NO2), 
+    SO2_daily_average = mean(SO2),
+    O3_daily_average = mean(O3),
+    CO_daily_average = mean(CO),
+    TEMP_daily_average = mean(TEMP),
+    DEWP_daily_average = mean(DEWP),
+    WSPM_daily_average = mean(WSPM)
+    )
+```
+
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+### Data
+```{r}
+PM_daily_ui <- fluidPage(
+  titlePanel("Daily Average Levels of PM2.5 and PM10"),
+      dateRangeInput(
+        "dateRange", 
+        label = "Select Date Range", 
+        start = min(daily_average$Date), 
+        end = max(daily_average$Date)
+      ),
+      selectInput(
+        "PM",
+        label = "Select Pollutant",
+        choices = c("PM2.5_daily_average","PM10_daily_average"),
+      ),
+      plotOutput("PM_daily")  
+  )
+
+server <- function(input, output) {
+  filtered_data <- reactive({
+    daily_average %>%
+      filter(Date >= input$dateRange[1] & Date <= input$dateRange[2])
+  })
+  
+  output$PM_daily <- renderPlot({
+    ggplot(data = filtered_data(), aes(x = Date)) + 
+      geom_line(aes(y = !!sym(input$PM)), 
+                linewidth = 0.5, color = "blue") + 
+      labs(
+        y = paste(input$PM, "Daily Average (µg/m³)"),
+        x = "Date"
+      ) +   
+      theme_linedraw() 
+  })
+}
+
+shinyApp(ui = PM_daily_ui, server = server)
+```
+
+### Description
+```{r}
+HTML("
+
+<p style='font-size: 25px; font-weight: bold;'>
+  Noticeable trends or anomalies:
+</p>
+
+
+<p style='font-size: 22px; line-height: 1.6;'>
+    From the two graphs, we can notice that both PM2.5 and PM10 levels suffer in maintaining     consistency in their values. They     are constantly alternating from maxima to minima throughout the months. From the graphs, we can conclude that during the summer     periods, PM2.5 and PM10 levels are the lowest, indicating a lower pollution rate, which may be due to hotter temperatures since     PM2.5 and PM10 have a negative correlation with Temperature.
+</p>
+
+<p style='font-size: 22px; line-height: 1.6;'>
+    On the other hand, PM2.5 and PM10 show higher levels during other seasonal periods, especially during the December period. This     indicates that higher pollution rates are expected during this period, which could be due to colder weather due to the negative     correlation between PM and Temperature values.
+</p>
+
+")
+```
+
+
+ 5
+=====================================
+
+```{r, include=FALSE}
+day_type_function <- function(date) {  
+  weekdays <- tolower(weekdays(date))
+  
+  if (weekdays == "saturday" || weekdays == "sunday") {
+    return("Weekend")
+  } else {
+    return("Weekday")
+  }
+}
+  
+cleaned_monitoring_dataset$day_type <- sapply(cleaned_monitoring_dataset$Date,
+                                              day_type_function)
+
+weekday_average_PM2.5 <- cleaned_monitoring_dataset %>% 
+  filter(day_type == "Weekday") %>%
+  summarise(weekday_PM2.5_average = mean(PM2.5))
+  
+  # Calculate weekend average
+weekend_average_PM2.5 <- cleaned_monitoring_dataset %>% 
+  filter(day_type == "Weekend") %>%
+  summarise(weekend_PM2.5_average = mean(PM2.5))
+```
+
+Row 
+-------------------------------------
+
+### Data
+```{r}
+weekdays_ui <- fluidPage(
+  titlePanel("PM2.5 Averages for Weekdays and Weekends"),
+  
+  textOutput("weekdayAverage"),
+  textOutput("weekendAverage")
+)
+
+server <- function(input, output) {
+  output$weekdayAverage <- renderText({
+    paste("Weekday PM2.5 Average:", weekday_average_PM2.5, "µg/m³")
+  })
+  
+  output$weekendAverage <- renderText({
+    paste("Weekend PM2.5 Average:", weekend_average_PM2.5, "µg/m³")
+  })
+}
+
+shinyApp(ui = weekdays_ui, server = server)
+```
+
+Row 
+-------------------------------------
+
+### Description
+```{r}
+HTML("
+
+<p style=\"font-size: 22px; line-height: 1.6;\">
+  <b style=\"font-size: 25px;\">Interpreting the difference:</b><br> 
+    The weekend average PM2.5 levels seem higher than weekday PM2.5 levels by approximately 6 µg/m³. This possibly shows that an       increase in pollution occurs during the weekend. Many factors could cause this increase, one of which is the enhanced traffic      conditions due to the fact that many people are going out for leisure.
+</p>
+
+")
+```
+
+
+ 6
+=====================================
+
+```{r, include=FALSE}
+timeOfDay_function <- function(hour) {
+  if(hour >= 21 || hour <= 4){
+    return("Night")
+  }else if(hour >= 5 && hour <= 11){
+    return("Morning")
+  }else if(hour >= 12 && hour <= 17){
+    return("Afternoon")
+  }
+  else{
+    return("Evening")
+  }
+}
+  
+cleaned_monitoring_dataset$timeOfDay <- sapply(cleaned_monitoring_dataset$hour,
+                                               timeOfDay_function)
+
+cleaned_monitoring_dataset$timeOfDay <- factor(
+  cleaned_monitoring_dataset$timeOfDay, 
+  levels = c("Morning", "Afternoon", "Evening", "Night")
+)
+
+average_PM2.5 <- cleaned_monitoring_dataset %>%
+  group_by(timeOfDay, Date) %>%
+  summarise(
+    PM2.5_timeOfDay_Average = mean(PM2.5)
+  )
+```
+
+
+```{r}
+timeOfDay_PM2.5_ui <- fluidPage(
+  titlePanel("PM2.5 Daily Average by Time of Day"),
+  dateRangeInput(
+    "dateRange",
+    label = "Select Date Range",
+    start = min(average_PM2.5$Date),
+    end = max(average_PM2.5$Date),
+    ),
+  plotOutput("PM2.5_timeOfDay", height = "600px") 
+  )
+
+server <- function(input, output) {
+  filtered_data <- reactive({
+    average_PM2.5 %>%
+      filter(Date >= input$dateRange[1] & Date <= input$dateRange[2])
+  })
+  
+  output$PM2.5_timeOfDay <- renderPlot({
+    ggplot(data = filtered_data(), aes(x = Date, y = PM2.5_timeOfDay_Average)) +
+      geom_line(linewidth = 0.5, aes(color = timeOfDay)) +
+      facet_wrap(~ timeOfDay) +
+      theme_linedraw() +
+      labs(
+        y = "PM2.5 (µg/m³)",
+        x = "Date"
+        )
+    })
+  }
+
+shinyApp(ui = timeOfDay_PM2.5_ui, server = server)
+```
+
+ 7
+=====================================
+
+Row
+-------------------------------------
+
+### Data
+```{r}
+pollutant_daily_ui <- fluidPage(
+  titlePanel("Daily Average Levels of NO2, SO2, O3 and CO"),
+  dateRangeInput(
+    "dateRange", 
+    label = "Select Date Range", 
+    start = min(daily_average$Date), 
+    end = max(daily_average$Date)
+    ),
+  selectInput(
+    "pollutant",
+    label = "Select Pollutant",
+    choices = c("NO2_daily_average","SO2_daily_average","O3_daily_average","CO_daily_average"),
+    ),
+  plotOutput("pollutant_daily")  
+  )
+
+server <- function(input, output) {
+  filtered_data <- reactive({
+    daily_average %>%
+      filter(Date >= input$dateRange[1] & Date <= input$dateRange[2])
+  })
+  
+  output$pollutant_daily <- renderPlot({
+    ggplot(data = filtered_data(), aes(x = Date)) + 
+      geom_line(aes(y = !!sym(input$pollutant)), linewidth = 0.5, color = "blue") + 
+      labs(
+        y = paste(input$pollutant, "Daily Average (µg/m³)"),
+        x = "Date"
+        ) +   
+      theme_linedraw() 
+    })
+  }
+
+shinyApp(ui = pollutant_daily_ui, server = server)
+```
+
+
+ 8
+=====================================
+
+```{r, include=FALSE}
+seasons_function <- function(month) {
+  if(month >= 3 && month <= 5){
+    return("Spring")
+  }else if(month >= 6 && month <= 8){
+    return("Summer")
+  }else if(month >= 9 && month <= 11){
+    return("Autumn")
+  }
+  else{
+    return("Winter")
+  }
+}
+  
+cleaned_monitoring_dataset$Seasons <- sapply(cleaned_monitoring_dataset$month,
+                                             seasons_function)
+```
+
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+### Data
+```{r}
+NO2_O3_seasonal_ui <- fluidPage(
+  titlePanel("Seasonal Variation in NO2 and O3 Levels"),
+  dateRangeInput(
+    "dateRange", 
+    label = "Select Date Range",
+    start = min(cleaned_monitoring_dataset$Date), 
+    end = max(cleaned_monitoring_dataset$Date)
+    ),
+  selectInput(
+    "pollutant",
+    label = "Select Pollutant",
+    choices = c("NO2", "O3"),
+    ),
+  plotOutput("NO2_O3_seasonal", height = "500px")  
+  )
+
+server <- function(input, output) {
+    filtered_data <- reactive({
+    cleaned_monitoring_dataset %>%
+      filter(Date >= input$dateRange[1] & Date <= input$dateRange[2])
+  })
+  output$NO2_O3_seasonal <- renderPlot({
+    ggplot(data = filtered_data(), aes(x = Seasons, y = !!sym(input$pollutant), fill = Seasons)) +
+      geom_boxplot() +
+      labs(
+        x = "Season", 
+        y = paste(input$pollutant, "Concentration (µg/m³)")
+        ) +
+      theme_linedraw() 
+    })
+  }
+
+shinyApp(ui = NO2_O3_seasonal_ui, server = server)
+```
+
+### Description
+```{r}
+HTML("
+
+<p style='font-size: 22px; line-height: 1.6;'>
+  <b style='font-size: 25px;'>Observed patterns:</b>
+  <br> 
+        From the graph of “Seasonal Variation in NO2 Levels”, we can notice that NO2 levels have a higher median in the autumn and         winter periods. This could be due to the negative correlation between pollutants and temperature and could also be due to          the higher heating demand during cold periods, which raises NO2 levels as a result of the combustion process in the power          plants. A higher IQR is also seen during these periods, indicating a larger variability in pollution rates. A significantly         lower median during the summer and spring periods can be seen, which may be due to lower heating demands, which reduce NO2         levels. A much lower IQR is also seen, especially in the summer period, indicating lower variability in pollution rates.
+  <br><br>
+        A significant rise in median O3 levels is seen during the spring and summer periods. This could be due to the increased            intensity of sunlight, which, when combined with pollutants, O3. A very large IQR is also visible, mainly in summer, which         indicates a greater variation in O3 levels, which could be due to weather events. Much lower median O3 rates are seen              during the autumn and winter periods, which could be due to lower sunlight intensity. A much lower IQR is also seen for            these seasons, which indicates a greater stability in O3 values during the autumn and winter seasons. 
+</p>
+
+")
+```
+
+
+ 9
+=====================================
+
+```{r, include=FALSE}
+top3_PM2.5_days <- daily_average[order(daily_average$PM2.5_daily_average,
+                                       decreasing = TRUE),][1:3,]
+
+top3_PM2.5_days_data <- 
+  data.frame(Date = top3_PM2.5_days$Date,
+             PM2.5 = top3_PM2.5_days$PM2.5_daily_average,
+             Temperature = top3_PM2.5_days$TEMP_daily_average,
+             Humidity = top3_PM2.5_days$DEWP_daily_average,
+             Wind_Speed = top3_PM2.5_days$WSPM_daily_average
+            )
+```
+
+Row {data-height=300}
+-------------------------------------
+
+### Data
+```{r}
+top3_ui <- fluidPage(
+  titlePanel("Analysis of Meteorological Conditions for the Top Three Most Polluted Days"),
+  
+  fluidRow(
+    tags$head(
+    tags$style(HTML(".table { width: 100% !important; }"))
+    ),
+    column(12, 
+           tableOutput("top3Table") 
+           )
+    )
+  )
+
+server <- function(input, output) {
+  output$top3Table <- renderTable({
+    top3_PM2.5_days_data$Date <- format(top3_PM2.5_days_data$Date, 
+                                        "%d/%m/%Y")
+    top3_PM2.5_days_data
+    })
+}
+
+shinyApp(ui = top3_ui, server = server)
+```
+
+Row
+-------------------------------------
+
+### Description
+```{r}
+HTML("
+
+<p style='font-size: 20px; line-height: 1.6;'>
+  <b style='font-size: 22px;'>25/12/2015</b><br> 
+  
+  On December 25, 2015, Beijing experienced severe smog, among the worst of the year, which cancelled flights, visibility was        extremely low, and the city remained engulfed in hazardous pollution prompting another “red alert” status mainly caused by coal    burning.
+  
+  <br><br>
+  
+    <a href='https://www.forbes.com/sites/trevornace/2015/12/09/beijing-declares-red-alert-pollution-haze-visible-space/#:~:text=Sc         ientists%20have%20determined%20that%20the%20vast%20majority%20of,relies%20heavily%20on%20coal%20for%20continued%20economic%         20development.'>      Beijing Declares 'Red Alert' Over Pollution: Haze Visible From Space    </a>
+   
+  Dec 17, 2015
+  
+  <br>
+  
+  <a href='https://indianexpress.com/article/world/world-news/years-worst-pollution-engulfs-beijing-on-christmas-day/'>Year’s worst pollution engulfs Beijing on Christmas Day</a>
+  
+  Dec 25, 2015
+  
+  <br>
+  
+  <a href='https://www.nytimes.com/2015/12/25/world/asia/liu-bolin-air-pollution-beijing-winter-solstice.html'>Hiding in Plain Sight as Beijing Disappears Into Blanket of Smog</a>
+  
+  Dec 24, 2015
+  
+  <br>
+  
+  <a href='https://www.chinadaily.com.cn/china/2015-12/25/content_22806691.htm'>Flights cancelled as heavy smog blankets Beijing</a>
+  
+  Dec 25, 2015
+  
+  
+  <br><br>
+  
+  
+  
+  <b style='font-size: 20px;'>01/12/2015</b><br> 
+  
+  On December 1, 2015, Beijing faced extreme air pollution that darkened the sky, creating hazardous conditions for residents and a “red alert”
+  
+  <br><br>
+  
+  
+  <a href='https://www.bbc.com/news/world-asia-china-35028483'>Beijing smog: Images before and after</a>
+  
+  Dec 7, 2015
+  
+  <br>
+  
+  <a href='https://www.bbc.com/news/av/world-asia-china-34972375'>China smog: 'The air is so polluted it's darkened the sky'</a>
+  
+  Dec 1, 2015
+  
+  <br>
+  
+  <a href='https://www.bbc.com/news/world-asia-china-35026363'>China pollution: First ever red alert in effect in Beijing</a>
+  
+  8 Dec, 2015
+  
+  <br><br>
+  
+  <b style='font-size: 20px;'>01/01/2017</b><br> 
+  
+  
+  On January 1, 2017, Beijing was masked in thick, toxic smog marking one of the longest air pollution episodes in recent years. Health alerts were issued, and the smog caused widespread travel chaos.
+  
+  
+  <br><br>
+  
+  
+  <a href='https://www.theguardian.com/world/2017/jan/02/china-smog-millions-start-new-year-shrouded-by-health-alerts-and-travel-chaos'>China smog: millions start new year shrouded by health alerts and travel chaos</a>
+  
+  Jan 2, 2017
+  
+  <br>
+  
+  <a href='https://unearthed.greenpeace.org/2017/01/11/beijing-air-pollution-smog-episode-longest-this-century'>Beijing’s latest air pollution episode is the longest this century</a>
+  
+  Jan 1, 2017
+  
+  <br>
+  
+  <a href='https://mashable.com/article/china-smog-new-year'>Beijing welcomed 2017 from beneath a blanket of smog</a>
+  Jan 1, 2017
+  
+  <br>
+
+  <a href='https://hongkongfp.com/2017/01/01/beijing-starts-2017-cloud-thick-toxic-smog'>Beijing starts 2017 under a cloud of thick toxic smog</a>
+  
+  Jan 1, 2017
+</p>
+
+")
+```
+
+
+
+
